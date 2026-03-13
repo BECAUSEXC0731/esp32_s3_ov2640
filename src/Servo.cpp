@@ -2,10 +2,11 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <ESP32Servo.h>
+#include "pid.h"
+#include "main.h"
 
-// === UDP 配置 ===
-unsigned int localPort = 4210;
-WiFiUDP udp;
+
+ 
 const int packetSize = 2;
 
 // === 舵机引脚 ===

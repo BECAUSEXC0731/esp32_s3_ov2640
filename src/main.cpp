@@ -14,8 +14,8 @@ extern WiFiUDP udp;
 #define PWDN_GPIO_NUM   -1
 #define RESET_GPIO_NUM   40
 #define XCLK_GPIO_NUM    -1
-#define SIOD_GPIO_NUM    41
-#define SIOC_GPIO_NUM    42
+#define SIOD_GPIO_NUM    42
+#define SIOC_GPIO_NUM    41
 
 #define Y9_GPIO_NUM      10
 #define Y8_GPIO_NUM      11
@@ -29,6 +29,7 @@ extern WiFiUDP udp;
 #define VSYNC_GPIO_NUM    2
 #define HREF_GPIO_NUM     1
 #define PCLK_GPIO_NUM     47
+
 
 // =================== 测试模式开关 ===================
 // 取消注释下面一行，启用彩条模式（摄像头输出内部彩条，不采集真实图像）
@@ -116,6 +117,7 @@ void setup()
   config.xclk_freq_hz = 10000000; // 降低时钟频率
   config.jpeg_quality = 12;
   config.fb_count = 1;
+  
 
 #ifdef ENABLE_JPEG_SERIAL_OUT
   // JPEG 模式
@@ -126,7 +128,7 @@ void setup()
   config.pixel_format = PIXFORMAT_RGB565;
   config.frame_size = FRAMESIZE_QVGA; // 可先测试小分辨率
 #endif
-
+delay(200);  // 等待硬件稳定
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK)
   {

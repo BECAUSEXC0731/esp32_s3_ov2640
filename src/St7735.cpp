@@ -9,7 +9,7 @@
 #define TFT_CS   6   // Chip Select
 #define TFT_DC   8   // Data/Command
 #define TFT_RST  7  // Reset
-
+//#define TFT_BL  5
 // 使用软件 SPI 构造函数：(cs, dc, mosi, sclk, rst)
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
 

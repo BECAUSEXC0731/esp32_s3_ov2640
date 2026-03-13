@@ -1,0 +1,95 @@
+#include "Servo.h"
+#include "WiFi.h"
+
+const char *ssid = "doomsday";
+const char *password = "123123123";
+IPAddress serverIP(10, 38, 172, 51); // 上位机的ip
+// === UDP 配置 ===
+unsigned int localPort = 4210;
+WiFiUDP udp;
+
+// 接收缓冲区（4个float = 16字节）
+const int packetSize = 16;
+uint8_t packetBuffer[packetSize];
+
+// 坐标结构体（用于存储解析后的值）
+struct Coordinates
+{
+  float palmX;
+  float palmY;
+  float centerX;
+  float centerY;
+};
+
+// 函数声明：将网络字节序（大端）的4字节转换为float（小端）
+float ntohf(uint32_t netLong)
+{
+  uint32_t hostLong = ntohl(netLong); // 转换为小端整数
+  float result;
+  memcpy(&result, &hostLong, sizeof(float));
+  return result;
+}
+
+void setup()
+{
+  Serial.begin(115200);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.print("Connected to ");
+  Serial.println(ssid);
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  // 开始UDP监听
+  if (udp.begin(localPort))
+  {
+    Serial.printf("UDP监听端口 %d 成功\n", localPort);
+  }
+  else
+  {
+    Serial.println("UDP监听启动失败！");
+  }
+}
+
+void loop()
+{ // 检查是否有数据包到达
+  int packetLen = udp.parsePacket();
+  if (packetLen)
+  {
+    // 读取数据包
+    int len = udp.read(packetBuffer, packetSize);
+    if (len == packetSize)
+    {
+      // 解析4个float（网络字节序 -> 主机字节序）
+      uint32_t *p = (uint32_t *)packetBuffer;
+      float palmX = ntohf(p[0]);
+      float palmY = ntohf(p[1]);
+      float centerX = ntohf(p[2]);
+      float centerY = ntohf(p[3]);
+
+      // 打印坐标到串口
+      Serial.print("收到数据包 - ");
+      Serial.print("手心: (");
+      Serial.print(palmX, 1);
+      Serial.print(", ");
+      Serial.print(palmY, 1);
+      Serial.print(") 中心: (");
+      Serial.print(centerX, 1);
+      Serial.print(", ");
+      Serial.print(centerY, 1);
+      Serial.println(")");
+    }
+    else
+    {
+      Serial.printf("数据包长度错误: 期望 %d 字节，实际 %d 字节\n", packetSize, len);
+    }
+  }
+
+  // 小延时，避免CPU占用过高
+  delay(10);
+}

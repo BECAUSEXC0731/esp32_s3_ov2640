@@ -11,24 +11,24 @@
 // extern WiFiUDP udp;
 
 // // =================== 摄像头引脚定义 ===================
-// #define PWDN_GPIO_NUM -1
-// #define RESET_GPIO_NUM 40
-// #define XCLK_GPIO_NUM -1
-// #define SIOD_GPIO_NUM 41
-// #define SIOC_GPIO_NUM 42
+// #define PWDN_GPIO_NUM   -1
+// #define RESET_GPIO_NUM   40
+// #define XCLK_GPIO_NUM    -1
+// #define SIOD_GPIO_NUM    41
+// #define SIOC_GPIO_NUM    42
 
-// #define Y9_GPIO_NUM 10
-// #define Y8_GPIO_NUM 11
-// #define Y7_GPIO_NUM 12
-// #define Y6_GPIO_NUM 13
-// #define Y5_GPIO_NUM 14
-// #define Y4_GPIO_NUM 15
-// #define Y3_GPIO_NUM 16
-// #define Y2_GPIO_NUM 17
+// #define Y9_GPIO_NUM      10
+// #define Y8_GPIO_NUM      11
+// #define Y7_GPIO_NUM      12
+// #define Y6_GPIO_NUM      13
+// #define Y5_GPIO_NUM      14
+// #define Y4_GPIO_NUM      15
+// #define Y3_GPIO_NUM      16
+// #define Y2_GPIO_NUM      17
 
-// #define VSYNC_GPIO_NUM 2
-// #define HREF_GPIO_NUM 1
-// #define PCLK_GPIO_NUM 47
+// #define VSYNC_GPIO_NUM    2
+// #define HREF_GPIO_NUM     1
+// #define PCLK_GPIO_NUM     47
 
 // // =================== 测试模式开关 ===================
 // // 取消注释下面一行，启用彩条模式（摄像头输出内部彩条，不采集真实图像）
@@ -38,7 +38,7 @@
 // // #define ENABLE_MANUAL_PIXEL_TEST
 
 // // 取消注释下面一行，启用JPEG串口输出测试（需PC端串口图像接收软件）
-// #define ENABLE_JPEG_SERIAL_OUT
+// // #define ENABLE_JPEG_SERIAL_OUT
 
 // // =================== 函数声明 ===================
 // void i2c_scan();
@@ -124,7 +124,7 @@
 // #else
 //   // RGB565 模式（用于屏幕显示）
 //   config.pixel_format = PIXFORMAT_RGB565;
-//   config.frame_size = FRAMESIZE_96X96; // 可先测试小分辨率
+//   config.frame_size = FRAMESIZE_QVGA; // 可先测试小分辨率
 // #endif
 
 //   esp_err_t err = esp_camera_init(&config);
@@ -191,33 +191,15 @@
 //     tft.println("Frame Error");
 //     delay(500);
 //     return;
-    
 //   }
-//   if (fb->format == PIXFORMAT_RGB565)//-------------------------------------------------------------
-//     {
-//       uint16_t *img = (uint16_t *)fb->buf;
-//       // 手动交换每个像素的高低字节（测试字节序）
-//       for (int i = 0; i < fb->width * fb->height; i++)
-//       {
-//         uint16_t p = img[i];
-//         img[i] = (p << 8) | (p >> 8); // 高低字节交换
-//       }
-//       tft.drawRGBBitmap(0, 0, img, fb->width, fb->height);
-//     }
-//     else
-//     {
-//       // ... 错误处理
-//     }
-
-//     esp_camera_fb_return(fb);
 
 // #ifdef ENABLE_JPEG_SERIAL_OUT
 //   // JPEG 串口输出测试
 //   Serial.printf("JPEG frame size: %d bytes\n", fb->len);
 //   send_jpeg_over_serial(fb->buf, fb->len);
 //   esp_camera_fb_return(fb);
-//   delay(100); // 降低频率避免串口阻塞
-//   return;
+//   delay(100);
+//   return; // 不再进行屏幕显示
 // #endif
 
 //   // 对于 RGB565 模式
@@ -262,12 +244,21 @@
 //     }
 //   }
 //   Serial.println("Manual pixel test applied.");
+// #else
+//   // 正常图像：尝试手动交换字节序（您之前有效的方法）
+//   // 注意：如果图像颜色仍然不对，可以注释掉下面的循环再试
+//   for (int i = 0; i < w * h; i++)
+//   {
+//     uint16_t p = img[i];
+//     img[i] = (p << 8) | (p >> 8); // 高低字节交换
+//   }
 // #endif
 
 //   // 显示图像
 //   tft.drawRGBBitmap(0, 0, img, w, h);
 
 //   esp_camera_fb_return(fb);
+//   // 可根据需要加 delay 控制帧率
 //   // delay(10);
 // }
 
@@ -320,18 +311,13 @@
 //   Serial.println("Manual reset pulse sent.");
 // }
 
-// // =================== JPEG 串口发送 (修正版) ===================
+// // =================== JPEG 串口发送 ===================
 // #ifdef ENABLE_JPEG_SERIAL_OUT
 // void send_jpeg_over_serial(uint8_t *buf, size_t len)
 // {
-//   // 摄像头生成的 buf 已经包含完整的 FF D8 ... FF D9
-//   // 不需要也不应该再手动添加帧头帧尾，否则会导致数据重复，PC端解析失败
-
-//   // 可选：为了便于PC端区分每一帧，可以在前后加一些非JPEG的特殊标记，
-//   // 但最简单的做法是直接发送原始数据，依靠识别 FF D8 和 FF D9 来切割。
-
+//   // 直接发送原始JPEG数据，PC端接收软件应能自动识别
 //   Serial.write(buf, len);
-//   // 发送一个换行符作为帧结束的标志（可选，方便调试，但不影响JPEG解析）
+//   // 可选：加一个换行符辅助分割（但JPEG数据中可能包含0x0A，故不推荐）
 //   // Serial.println();
 // }
 // #endif
