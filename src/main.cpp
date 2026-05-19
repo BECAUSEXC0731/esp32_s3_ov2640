@@ -8,16 +8,14 @@
 // =================== WiFi 配置 ===================
 const char *ssid = "doomsday";
 const char *password = "123123123";
+// #define DISABLE_WIFI
 
-WiFiServer server(8080);
-WiFiClient client;
-
-// =================== 摄像头引脚 ===================
+// =================== 摄像头引脚定义 ===================
 #define PWDN_GPIO_NUM   -1
-#define RESET_GPIO_NUM   40
-#define XCLK_GPIO_NUM    -1
-#define SIOD_GPIO_NUM    42
-#define SIOC_GPIO_NUM    41
+#define RESET_GPIO_NUM  40
+#define XCLK_GPIO_NUM   -1
+#define SIOD_GPIO_NUM   42
+#define SIOC_GPIO_NUM   41
 
 #define Y9_GPIO_NUM      10
 #define Y8_GPIO_NUM      11
@@ -32,49 +30,115 @@ WiFiClient client;
 #define HREF_GPIO_NUM     1
 #define PCLK_GPIO_NUM     47
 
-bool camera_ok = false;
+// =================== 屏幕参数 ===================
+#define SCREEN_WIDTH  128
+#define SCREEN_HEIGHT 160
 
-// 简单屏幕输出（仅在启动和连接时刷新，运行时不刷新以节省 CPU）
-void screen_print(const char* msg) {
-  tft.fillScreen(ST7735_BLACK);
-  tft.setCursor(0, 0);
-  tft.setTextColor(ST7735_WHITE);
-  tft.println(msg);
-}
+// 帧缓冲区
+uint16_t *screenBuffer = nullptr;
+
+// 预计算映射表（旋转+缩放）
+int *xMap = nullptr;   // 源Y坐标映射
+int *yMap = nullptr;   // 源X坐标映射
+int last_img_w = 0, last_img_h = 0;  // 缓存上次分辨率
+
+void manual_reset();
+void camera_setup();
+
+bool camera_ok = false;
+bool has_psram = false;
 
 void setup() {
-  St7735_Init();
-  screen_print("Starting...");
+  // 分配屏幕缓冲区
+  screenBuffer = (uint16_t*)malloc(SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint16_t));
+  if (!screenBuffer) while(1);
 
-  // 复位摄像头
-  if (RESET_GPIO_NUM != -1) {
-    pinMode(RESET_GPIO_NUM, OUTPUT);
-    digitalWrite(RESET_GPIO_NUM, LOW);
-    delay(20);
-    digitalWrite(RESET_GPIO_NUM, HIGH);
-    delay(100);
-  }
+  // 预分配映射表
+  xMap = (int*)malloc(SCREEN_WIDTH * sizeof(int));
+  yMap = (int*)malloc(SCREEN_HEIGHT * sizeof(int));
+  if (!xMap || !yMap) while(1);
+
+  St7735_Init();
+  tft.fillScreen(ST7735_BLACK);
+  
+  has_psram = (ESP.getPsramSize() > 0);
+
+  if (RESET_GPIO_NUM != -1) manual_reset();
 
   Wire.begin(SIOD_GPIO_NUM, SIOC_GPIO_NUM);
 
-  // 连接 WiFi
-  tft.println("Connecting WiFi...");
+#ifndef DISABLE_WIFI
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
+  int timeout = 0;
+  while (WiFi.status() != WL_CONNECTED && timeout < 20) {
     delay(500);
-    tft.print(".");
+    timeout++;
   }
-  tft.println("\nWiFi OK");
-  tft.print("IP: ");
-  tft.println(WiFi.localIP());
+#endif
 
-  server.begin();
-  tft.print("Port: ");
-  tft.println(8080);
+  camera_setup();
 
-  // 摄像头配置 (高性能)
+  if (!camera_ok) while(1) delay(1000);
+
+  tft.fillScreen(ST7735_BLACK);
+}
+
+void loop() {
+  if (!camera_ok) {
+    delay(1000);
+    return;
+  }
+
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) {
+    delay(100);
+    return;
+  }
+
+  if (fb->format == PIXFORMAT_RGB565) {
+    uint16_t *img = (uint16_t *)fb->buf;
+    int img_w = fb->width;
+    int img_h = fb->height;
+
+    // 若分辨率改变，重新计算映射表
+    if (img_w != last_img_w || img_h != last_img_h) {
+      // 水平映射：目标 x -> 源 Y (旋转后的行)
+      for (int x = 0; x < SCREEN_WIDTH; x++) {
+        xMap[x] = (x * img_h) / SCREEN_WIDTH;
+      }
+      // 垂直映射：目标 y -> 源 X (旋转后的列，顺时针旋转90°)
+      for (int y = 0; y < SCREEN_HEIGHT; y++) {
+        // 源X = img_w - 1 - (y * img_w) / SCREEN_HEIGHT
+        yMap[y] = img_w - 1 - (y * img_w) / SCREEN_HEIGHT;
+      }
+      last_img_w = img_w;
+      last_img_h = img_h;
+    }
+
+    // 填充缓冲区：同时完成旋转、缩放、字节交换
+    for (int y = 0; y < SCREEN_HEIGHT; y++) {
+      int src_x_base = yMap[y];
+      int dst_row = y * SCREEN_WIDTH;
+      for (int x = 0; x < SCREEN_WIDTH; x++) {
+        int src_y = xMap[x];
+        uint16_t pixel = img[src_y * img_w + src_x_base];
+        // 字节交换
+        screenBuffer[dst_row + x] = (pixel << 8) | (pixel >> 8);
+      }
+    }
+
+    // 一次性绘制
+    tft.drawRGBBitmap(0, 0, screenBuffer, SCREEN_WIDTH, SCREEN_HEIGHT);
+  }
+
+  esp_camera_fb_return(fb);
+}
+
+// =================== 摄像头配置 ===================
+void camera_setup() {
   camera_config_t config;
   memset(&config, 0, sizeof(config));
+
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
   config.pin_d0 = Y2_GPIO_NUM;
@@ -93,75 +157,44 @@ void setup() {
   config.pin_sccb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
-
-  // 关键优化：提高时钟频率，使用双缓冲
-  config.xclk_freq_hz = 20000000;       // 20MHz (稳定，可尝试 24000000)
+  config.xclk_freq_hz = 8000000;
   config.pixel_format = PIXFORMAT_RGB565;
-  config.frame_size = FRAMESIZE_QQVGA;  // 160x120
-  config.jpeg_quality = 12;
-  config.fb_count = 2;                  // 双缓冲提升并行度
-  config.fb_location = CAMERA_FB_IN_DRAM;
+
+  if (has_psram) {
+    config.frame_size = FRAMESIZE_QVGA;   // 320x240
+    config.fb_count = 2;
+    config.fb_location = CAMERA_FB_IN_PSRAM;
+  } else {
+    config.frame_size = FRAMESIZE_QQVGA;  // 160x120
+    config.fb_count = 1;
+    config.fb_location = CAMERA_FB_IN_DRAM;
+  }
 
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    tft.printf("Cam err: 0x%x", err);
-    while(1) delay(1000);
+    camera_ok = false;
+    return;
   }
 
-  // 传感器设置（仅使用确定存在的函数）
   sensor_t *s = esp_camera_sensor_get();
   if (s) {
     s->set_brightness(s, 0);
     s->set_contrast(s, 0);
     s->set_saturation(s, 0);
-    s->set_whitebal(s, 1);      // 开启白平衡（为了颜色正常，不关）
-    s->set_gain_ctrl(s, 0);     // 关闭自动增益
-    s->set_exposure_ctrl(s, 1); // 开启自动曝光（避免画面过暗/过亮）
+    s->set_whitebal(s, 1);
+    s->set_gain_ctrl(s, 0);
+    s->set_exposure_ctrl(s, 1);
     s->set_hmirror(s, 0);
-    s->set_vflip(s, 1);         // 垂直翻转，修正上下颠倒
+    s->set_vflip(s, 0);
   }
-
-  tft.println("Camera ready");
-  tft.println("Waiting client...");
   camera_ok = true;
 }
 
-void loop() {
-  if (!camera_ok) return;
-
-  // 等待客户端连接
-  if (!client.connected()) {
-    client = server.available();
-    if (client.connected()) {
-      tft.fillScreen(ST7735_BLACK);
-      tft.setCursor(0, 0);
-      tft.println("Client connected");
-      tft.print("IP: ");
-      tft.println(WiFi.localIP());
-      tft.println("Streaming...");
-    }
-    delay(10);
-    return;
-  }
-
-  // 获取一帧（双缓冲模式，抓帧和发送可重叠）
-  camera_fb_t *fb = esp_camera_fb_get();
-  if (!fb) return;
-
-  if (fb->format == PIXFORMAT_RGB565) {
-    // 字节序交换（让 PC 端直接正确解析）
-    uint16_t *img = (uint16_t*)fb->buf;
-    for (size_t i = 0; i < fb->len / 2; i++) {
-      uint16_t p = img[i];
-      img[i] = (p << 8) | (p >> 8);
-    }
-
-    // 发送数据：2字节长度 + 图像数据
-    uint16_t imgSize = fb->len;
-    client.write((uint8_t*)&imgSize, sizeof(imgSize));
-    client.write(fb->buf, fb->len);
-  }
-
-  esp_camera_fb_return(fb);
-  // 不添加任何 delay，让数据尽快发送
+void manual_reset() {
+  if (RESET_GPIO_NUM == -1) return;
+  pinMode(RESET_GPIO_NUM, OUTPUT);
+  digitalWrite(RESET_GPIO_NUM, LOW);
+  delay(20);
+  digitalWrite(RESET_GPIO_NUM, HIGH);
+  delay(100);
 }
